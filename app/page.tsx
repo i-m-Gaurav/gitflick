@@ -3,37 +3,14 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Repository, fetchRandomRepositories } from "@/services/github";
 import { RepoCard } from "@/components/RepoCard";
-import { Loader2, Shuffle } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 export default function Home() {
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [mixing, setMixing] = useState(false);
   const loadingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // Handle Mix button click
-  const handleMixClick = useCallback(async () => {
-    if (loadingRef.current) return;
-    
-    setMixing(true);
-    // Scroll to top first
-    if (containerRef.current) {
-      containerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-    
-    try {
-      const newRepos = await fetchRandomRepositories();
-      if (newRepos.length > 0) {
-        setRepositories(newRepos);
-      }
-    } catch (error) {
-      console.error("Error mixing repositories:", error);
-    } finally {
-      setMixing(false);
-    }
-  }, []);
 
   // Load more repositories function
   const loadMoreRepositories = useCallback(async (clearExisting = false) => {
@@ -47,12 +24,13 @@ export default function Home() {
       
       if (newRepos.length > 0) {
         setRepositories(prev => clearExisting ? newRepos : [...prev, ...newRepos]);
+        setError(null);
       } else if (repositories.length === 0) {
         setError("No repositories found. Please try again later.");
       }
     } catch (error) {
       console.error("Error loading repositories:", error);
-      setError("Failed to load repositories. Please check your connection and try again.");
+      setError(error instanceof Error ? error.message : "Failed to load repositories. Please try again later.");
     } finally {
       loadingRef.current = false;
       setLoading(false);
@@ -64,15 +42,15 @@ export default function Home() {
     loadMoreRepositories();
   }, [loadMoreRepositories]);
 
-  // Handle scroll event for infinite scrolling
+  // Handle scroll event for infinite scrolling with debounce
   const handleScroll = useCallback(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || loading || loadingRef.current) return;
     
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
     const scrollPosition = scrollTop + clientHeight;
     
-    // Load more when reaching 80% of the scroll height
-    if (scrollPosition >= scrollHeight * 0.8 && !loadingRef.current && !loading) {
+    // Load more when reaching 90% of the scroll height (reduced from 80%)
+    if (scrollPosition >= scrollHeight * 0.9) {
       loadMoreRepositories();
     }
   }, [loadMoreRepositories, loading]);
@@ -80,8 +58,18 @@ export default function Home() {
   useEffect(() => {
     const container = containerRef.current;
     if (container) {
-      container.addEventListener("scroll", handleScroll);
-      return () => container.removeEventListener("scroll", handleScroll);
+      let timeoutId: NodeJS.Timeout;
+      
+      const debouncedScroll = () => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => handleScroll(), 500); // 500ms debounce
+      };
+      
+      container.addEventListener("scroll", debouncedScroll);
+      return () => {
+        container.removeEventListener("scroll", debouncedScroll);
+        clearTimeout(timeoutId);
+      };
     }
   }, [handleScroll]);
 
@@ -121,18 +109,18 @@ export default function Home() {
   return (
     <div className="relative">
       {/* Mix button */}
-      <button
-        onClick={handleMixClick}
-        disabled={loading || mixing}
+      {/* <button
+        onClick={() => loadMoreRepositories(true)}
+        disabled={loading}
         className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white rounded-full shadow-lg transition-all transform hover:scale-105 active:scale-95 disabled:scale-100"
       >
-        {mixing ? (
+        {loading ? (
           <Loader2 className="w-5 h-5 animate-spin" />
         ) : (
           <Shuffle className="w-5 h-5" />
         )}
-        <span className="font-medium">{mixing ? 'Mixing...' : 'Mix'}</span>
-      </button>
+        <span className="font-medium">{loading ? 'Loading...' : 'Mix'}</span>
+      </button> */}
 
       <div
         ref={containerRef}
@@ -146,6 +134,13 @@ export default function Home() {
         {loading && repositories.length > 0 && (
           <div className="flex items-center justify-center p-8">
             <Loader2 className="w-8 h-8 text-white animate-spin" />
+          </div>
+        )}
+
+        {/* Error message for rate limit */}
+        {error && repositories.length > 0 && (
+          <div className="text-center p-8 text-white/80">
+            {error}
           </div>
         )}
       </div>
